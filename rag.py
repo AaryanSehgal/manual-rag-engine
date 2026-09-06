@@ -39,17 +39,7 @@ def cosine_similarity(vector_a, vector_b):
     return numerator / denominator
 
 
-with open("document.txt", "r") as file:
-    text = file.read()
-
-chunks = text.split("\n\n")
-
-chunk_embedding = [get_embedding(c) for c in chunks]
-
-user_input = input("what are you looking to get answer on today? ")
-
-
-def retriver(chunks, chunk_embeddings, question=user_input):
+def retriver(chunks, chunk_embeddings, question):
     best_score = -1
     best_chunk = None
     question_embedding = get_embedding(question)
@@ -60,11 +50,7 @@ def retriver(chunks, chunk_embeddings, question=user_input):
             best_score = score
             best_chunk = chunk
 
-    print(best_chunk, best_score)
-    return best_chunk
-
-
-best_chunk = retriver(chunks, chunk_embedding)
+    return best_chunk, best_score
 
 
 # now feed the best chunk back into the model so it actually answers
@@ -82,7 +68,3 @@ def generate_answer(question, context):
     )
 
     return response.choices[0].message.content
-
-
-answer = generate_answer(user_input, best_chunk)
-print(answer)
