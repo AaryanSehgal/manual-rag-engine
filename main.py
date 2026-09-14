@@ -1,27 +1,35 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from rag import get_embedding, retriver, generate_answer
+from rag import load_corpus, retrieve, generate_answer
 
 app = FastAPI()
 
-# load and chunk the document ONCE, when the server starts
-with open("document.txt", "r") as file:
-    text = file.read()
-
-chunks = text.split("\n\n")
-chunk_embeddings = [get_embedding(c) for c in chunks]
+print("loading corpus...")
+corpus = load_corpus()
+print(f"loaded {len(corpus)} passages")
 
 
 class Question(BaseModel):
     query: str
+    k: int = 5
+    relevant_only: bool = False
+
+
+@app.get("/")
+def home():
+    return {"status": "running", "passages": len(corpus)}
 
 
 @app.post("/ask")
 def ask(q: Question):
-    best_chunk, best_score = retriver(chunks, chunk_embeddings, q.query)
-    answer = generate_answer(q.query, best_chunk)
+    filters = {"relevant": True} if q.relevant_only else None
+    retrieved = retrieve(q.query, corpus, k=q.k, filters=filters)
+    answer = generate_answer(q.query, retrieved)
+
     return {
         "answer": answer,
-        "matched_chunk": best_chunk,
-        "score": round(best_score, 4)
+        "sources": [
+            {"id": c["id"], "score": round(score, 4), "text": c["text"][:200]}
+            for score, c in retrieved
+        ]
     }

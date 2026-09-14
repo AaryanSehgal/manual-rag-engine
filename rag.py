@@ -1,23 +1,29 @@
 import os
 import math
+import json
 from dotenv import load_dotenv
 from openai import OpenAI
+from cache import cache, cache_key, save_cache
 
 load_dotenv()
 client = OpenAI()
 
 
 def get_embedding(text):
-    """Get the embedding vector for a piece of text using OpenAI."""
+    key = cache_key(text)
+    if key in cache:
+        return cache[key]
+
     response = client.embeddings.create(
         model="text-embedding-3-small",
         input=text
     )
-    return response.data[0].embedding
+    vector = response.data[0].embedding
+    cache[key] = vector
+    return vector
 
 
 def dot_product(vector_a, vector_b):
-    # multiply matching numbers from both vectors and add them all up
     total = 0
     for num_a, num_b in zip(vector_a, vector_b):
         total += num_a * num_b
@@ -25,7 +31,6 @@ def dot_product(vector_a, vector_b):
 
 
 def magnitude(vector):
-    # length of the vector - square every number, add them, square root it
     sum_of_squares = 0
     for num in vector:
         sum_of_squares += num * num
@@ -33,37 +38,45 @@ def magnitude(vector):
 
 
 def cosine_similarity(vector_a, vector_b):
-    # cos(angle) between two vectors = dot product / (length_a * length_b)
     numerator = dot_product(vector_a, vector_b)
     denominator = magnitude(vector_a) * magnitude(vector_b)
     return numerator / denominator
 
 
-def retriver(chunks, chunk_embeddings, question):
-    best_score = -1
-    best_chunk = None
-    question_embedding = get_embedding(question)
-
-    for chunk, chunk_emb in zip(chunks, chunk_embeddings):
-        score = cosine_similarity(question_embedding, chunk_emb)
-        if score > best_score:
-            best_score = score
-            best_chunk = chunk
-
-    return best_chunk, best_score
+def load_corpus():
+    with open("corpus.json", "r") as f:
+        corpus = json.load(f)
+    for c in corpus:
+        c["embedding"] = get_embedding(c["text"])
+    save_cache()
+    return corpus
 
 
-# now feed the best chunk back into the model so it actually answers
-# the question instead of just returning the raw text
+def retrieve(question, corpus, k=5, filters=None):
+    q_emb = get_embedding(question)
 
-def generate_answer(question, context):
+    candidates = corpus
+    if filters:
+        candidates = [c for c in corpus if all(c.get(key) == val for key, val in filters.items())]
+
+    scored = []
+    for c in candidates:
+        scored.append((cosine_similarity(q_emb, c["embedding"]), c))
+
+    scored.sort(reverse=True, key=lambda x: x[0])
+    return scored[:k]
+
+
+def generate_answer(question, chunks):
+    context = "\n\n".join([c["text"] for score, c in chunks])
+
     system_prompt = "answer the question using only the context below, dont use anything you already know. if the context doesnt have the answer just say you dont know"
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"context: {context} question: {question}"}
+            {"role": "user", "content": f"context: {context}\n\nquestion: {question}"}
         ]
     )
 
